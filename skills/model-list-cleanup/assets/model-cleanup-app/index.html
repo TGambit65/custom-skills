@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenClaw Model Cleanup</title>
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--muted:#8b949e;--text:#e6edf3;--line:#30363d;--accent:#7c3aed;--good:#2ea043;--warn:#f2cc60;--bad:#ff7b72;--input:#0d1117}
+*{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#0d1117,#141827 60%,#111827);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+header{position:sticky;top:0;z-index:10;padding:18px 24px;border-bottom:1px solid var(--line);background:rgba(13,17,23,.92);backdrop-filter:blur(10px)}
+h1{margin:0 0 6px;font-size:24px}.sub{color:var(--muted);display:flex;gap:14px;flex-wrap:wrap}.wrap{padding:20px 24px 160px;max-width:1500px;margin:0 auto}.toolbar{display:grid;grid-template-columns:1fr 180px 170px 170px;gap:10px;margin:0 0 16px}.toolbar input,.toolbar select,.prompt{width:100%;background:var(--input);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px}.card{background:rgba(22,27,34,.88);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 8px 24px rgba(0,0,0,.18)}.card[draggable=true]{cursor:grab}.card.dragging{opacity:.45}.card-top{display:flex;gap:10px;align-items:flex-start}.model-title{font-weight:700;font-size:15px;word-break:break-word}.alias{color:#c084fc;font-size:12px}.meta{color:var(--muted);font-size:12px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap}.pill{border:1px solid var(--line);border-radius:999px;padding:1px 7px}.best{margin:12px 0 8px}.uses{margin:0;padding-left:20px;color:#c9d1d9}.action{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}.action-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}.prompt[disabled]{opacity:.45}.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.deck{position:fixed;left:0;right:0;bottom:0;background:rgba(13,17,23,.96);border-top:1px solid var(--line);box-shadow:0 -10px 30px rgba(0,0,0,.35);padding:12px 24px;z-index:20}.deck-inner{max-width:1500px;margin:auto;display:grid;grid-template-columns:1fr 1fr 170px;gap:14px;align-items:stretch}.drop{min-height:116px;border:1px dashed var(--line);border-radius:14px;padding:10px;background:rgba(22,27,34,.72)}.drop.over{border-color:var(--accent);background:rgba(124,58,237,.15)}.drop h2{font-size:14px;margin:0 0 6px;display:flex;justify-content:space-between}.count{color:var(--muted);font-weight:400}.chip{display:grid;grid-template-columns:minmax(150px,260px) 1fr auto;gap:8px;align-items:center;background:#0d1117;border:1px solid var(--line);border-radius:12px;padding:8px;margin:6px 0}.chip b{font-size:12px;word-break:break-word}.remove{background:transparent;color:var(--bad);border:1px solid var(--line);border-radius:8px;padding:6px 8px;cursor:pointer}.buttons{display:flex;flex-direction:column;gap:8px}.btn{border:0;border-radius:12px;padding:10px 12px;color:white;background:var(--accent);font-weight:700;cursor:pointer}.btn.secondary{background:#30363d}.btn.good{background:var(--good)}.status{font-size:12px;color:var(--muted);min-height:34px}.empty{color:var(--muted);font-size:13px;padding:12px}.small{font-size:12px;color:var(--muted)}
+@media(max-width:900px){.toolbar{grid-template-columns:1fr}.deck{position:static}.deck-inner{grid-template-columns:1fr}.wrap{padding-bottom:20px}.chip{grid-template-columns:1fr}.buttons{flex-direction:row;flex-wrap:wrap}}
+</style>
+</head>
+<body>
+<header>
+  <h1>OpenClaw Model Cleanup</h1>
+  <div class="sub"><span id="summary">Loading model config…</span><span>No browser storage: state lives only in this page until saved to the server JSON file.</span></div>
+</header>
+<main class="wrap">
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Search model, provider, alias, capability…" />
+    <select id="provider"><option value="">All providers</option></select>
+    <select id="role"><option value="">All roles</option><option value="use">Current use</option><option value="failover">Current failover</option><option value="catalog">Catalog only</option></select>
+    <select id="cap"><option value="">All capabilities</option><option value="reasoning">Reasoning</option><option value="vision">Vision/multimodal</option><option value="code">Code-oriented</option><option value="cheap">Cheap/free/local</option></select>
+  </div>
+  <section id="cards" class="grid" aria-live="polite"></section>
+</main>
+<section class="deck">
+  <div class="deck-inner">
+    <div id="useDrop" class="drop" data-list="use"><h2>Model Use list <span class="count" id="useCount">0</span></h2><div id="useItems" class="items"><div class="empty">Drag any model here. A use-case prompt field appears after drop.</div></div></div>
+    <div id="fallbackDrop" class="drop" data-list="fallback"><h2>Fallback / Failover list <span class="count" id="fallbackCount">0 / 5</span></h2><div id="fallbackItems" class="items"><div class="empty">Drag up to 5 fallback models here.</div></div></div>
+    <div class="buttons">
+      <button id="save" class="btn good">Save for Echo</button>
+      <button id="export" class="btn secondary">Download JSON</button>
+      <button id="clear" class="btn secondary">Clear lists</button>
+      <div id="saveStatus" class="status"></div>
+    </div>
+  </div>
+</section>
+<script>
+let catalog = []; let current = {}; let draggedId = null; const selectedActions = new Map(); const lists = {use: [], fallback: []};
+const $ = s => document.querySelector(s); const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+function caps(m){ const txt=(m.id+' '+m.bestAt+' '+m.useCases.join(' ')).toLowerCase(); return {reasoning:m.reasoning===true||/reason|opus|sonnet|deep|magistral|aegis|hunter/.test(txt), vision:(m.input||[]).includes('image')||/vision|image|video|multimodal|pixtral|gemini/.test(txt), code:/code|codex|coder|codestral|devstral|copilot|program|patch|repo/.test(txt), cheap:/cheap|free|local|ollama|haiku|flash|lite|mini|nano|small|qwen3-4b|phi|gemma|llama3/.test(txt)} }
+function renderFilters(){ const providers=[...new Set(catalog.map(m=>m.providerDisplay))].sort(); $('#provider').innerHTML='<option value="">All providers</option>'+providers.map(p=>`<option>${esc(p)}</option>`).join(''); }
+function visible(m){ const q=$('#search').value.toLowerCase().trim(); const p=$('#provider').value; const r=$('#role').value; const c=$('#cap').value; const blob=[m.id,m.name,m.alias,m.providerDisplay,m.bestAt,...m.useCases].join(' ').toLowerCase(); if(q&&!blob.includes(q))return false; if(p&&m.providerDisplay!==p)return false; if(r&&m.currentRole!==r)return false; if(c&&!caps(m)[c])return false; return true; }
+function card(m){ const checked=selectedActions.has(m.id); const cap=caps(m); return `<article class="card ${checked?'selected':''}" draggable="true" data-id="${esc(m.id)}">
+  <div class="card-top"><input class="needs-action" type="checkbox" ${checked?'checked':''} aria-label="Action required for ${esc(m.id)}"><div><div class="model-title">${esc(m.id)}</div><div class="alias">${m.alias?`alias: ${esc(m.alias)} · `:''}${esc(m.name)}</div><div class="meta"><span class="pill">${esc(m.providerDisplay)}</span><span class="pill">${esc(m.currentRole)}</span>${m.contextWindow?`<span class="pill">ctx ${esc(m.contextWindow)}</span>`:''}${cap.vision?'<span class="pill">vision</span>':''}${cap.reasoning?'<span class="pill">reasoning</span>':''}${cap.code?'<span class="pill">code</span>':''}</div></div></div>
+  <p class="best"><b>Best at:</b> ${esc(m.bestAt)}</p><ul class="uses">${m.useCases.map(u=>`<li>${esc(u)}</li>`).join('')}</ul>
+  <div class="action"><label class="action-row"><span>Action prompt</span></label><input class="prompt action-prompt" placeholder="Required when checkbox is checked — what should Echo do with this model?" value="${esc(selectedActions.get(m.id)||'')}" ${checked?'required':'disabled'}></div>
+</article>`; }
+function renderCards(){ const filtered=catalog.filter(visible); $('#cards').innerHTML=filtered.map(card).join('')||'<div class="empty">No models match the filters.</div>'; $('#summary').textContent=`${catalog.length} configured models · ${current.currentUse?.[0]||'no primary'} primary · ${current.currentFailover?.length||0} configured failovers`; wireCards(); }
+function wireCards(){ document.querySelectorAll('.card').forEach(el=>{ const id=el.dataset.id; el.addEventListener('dragstart',e=>{draggedId=id; el.classList.add('dragging'); e.dataTransfer.setData('text/plain', id);}); el.addEventListener('dragend',()=>el.classList.remove('dragging')); const cb=el.querySelector('.needs-action'); const input=el.querySelector('.action-prompt'); cb.addEventListener('change',()=>{ if(cb.checked){selectedActions.set(id,input.value); input.disabled=false; input.required=true; input.focus(); el.classList.add('selected');} else {selectedActions.delete(id); input.disabled=true; input.required=false; el.classList.remove('selected');}}); input.addEventListener('input',()=>{ if(cb.checked) selectedActions.set(id,input.value);}); }); }
+function addTo(list,id){ if(!id)return; if(list==='fallback' && lists.fallback.length>=5 && !lists.fallback.includes(id)){ alert('Fallback list is capped at 5 models.'); return; } if(!lists[list].includes(id)) lists[list].push(id); renderLists(); }
+function removeFrom(list,id){ lists[list]=lists[list].filter(x=>x!==id); renderLists(); }
+function renderLists(){ for(const list of ['use','fallback']){ const root=$(`#${list}Items`); const arr=lists[list]; root.innerHTML=arr.length?arr.map(id=>`<div class="chip" data-id="${esc(id)}"><b>${esc(id)}</b><input class="prompt list-prompt" placeholder="${list==='use'?'Use-case prompt for this model':'Fallback condition / when should this be used?'}" data-list="${list}" data-id="${esc(id)}"><button class="remove" data-list="${list}" data-id="${esc(id)}">Remove</button></div>`).join(''):`<div class="empty">${list==='use'?'Drag any model here. A use-case prompt field appears after drop.':'Drag up to 5 fallback models here.'}</div>`; }
+  $('#useCount').textContent=String(lists.use.length); $('#fallbackCount').textContent=`${lists.fallback.length} / 5`; document.querySelectorAll('.remove').forEach(b=>b.addEventListener('click',()=>removeFrom(b.dataset.list,b.dataset.id))); }
+function wireDrops(){ document.querySelectorAll('.drop').forEach(drop=>{ drop.addEventListener('dragover',e=>{e.preventDefault(); drop.classList.add('over');}); drop.addEventListener('dragleave',()=>drop.classList.remove('over')); drop.addEventListener('drop',e=>{e.preventDefault(); drop.classList.remove('over'); addTo(drop.dataset.list, e.dataTransfer.getData('text/plain')||draggedId);}); }); }
+function gather(){ const listPrompts={use:{},fallback:{}}; document.querySelectorAll('.list-prompt').forEach(i=>{ listPrompts[i.dataset.list][i.dataset.id]=i.value; }); const missingActions=[...selectedActions.entries()].filter(([_,p])=>!p.trim()).map(([id])=>id); if(missingActions.length) throw new Error('Missing action prompts for: '+missingActions.join(', ')); return {source:'openclaw-model-cleanup-webpage', savedFrom:location.href, modelsSeen:catalog.length, actionRequests:[...selectedActions.entries()].map(([modelId,prompt])=>({modelId,prompt:prompt.trim()})), modelUseList:lists.use.map(modelId=>({modelId,useCasePrompt:(listPrompts.use[modelId]||'').trim()})), fallbackList:lists.fallback.map(modelId=>({modelId,fallbackPrompt:(listPrompts.fallback[modelId]||'').trim()})), currentUse:current.currentUse, currentFailover:current.currentFailover}; }
+async function save(){ try{ const payload=gather(); const res=await fetch('/api/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const j=await res.json(); if(!res.ok||!j.ok) throw new Error(j.error||res.statusText); $('#saveStatus').textContent=`Saved ${payload.actionRequests.length} actions, ${payload.modelUseList.length} use models, ${payload.fallbackList.length} fallbacks to ${j.statePath}`; }catch(err){ $('#saveStatus').textContent=err.message; }}
+function download(){ try{ const payload=gather(); const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='model-cleanup-plan.json'; a.click(); URL.revokeObjectURL(a.href); }catch(err){ $('#saveStatus').textContent=err.message; }}
+async function init(){ const res=await fetch('/api/models',{cache:'no-store'}); current=await res.json(); catalog=current.models; renderFilters(); renderCards(); wireDrops(); ['search','provider','role','cap'].forEach(id=>$('#'+id).addEventListener('input',renderCards)); $('#save').addEventListener('click',save); $('#export').addEventListener('click',download); $('#clear').addEventListener('click',()=>{lists.use=[];lists.fallback=[];renderLists();}); renderLists(); }
+init().catch(err=>{$('#cards').innerHTML='<div class="empty">Failed to load models: '+esc(err.message)+'</div>';});
+</script>
+</body>
+</html>
